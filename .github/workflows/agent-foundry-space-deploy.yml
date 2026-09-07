@@ -37,7 +37,10 @@ permissions:
 jobs:
   deploy:
     name: Deploy Space
-    runs-on: ubuntu-latest
+    # The runner pod is provisioned in idp/platform/agent-foundry/runner/. The HF
+    # token is already mounted at $HF_TOKEN_FILE on the pod by ESO; the workflow
+    # does NOT carry the token, the runner's env does. No GitHub Secrets UI step.
+    runs-on: [self-hosted, agent-foundry]
     steps:
       - name: Checkout agent-foundry
         uses: actions/checkout@v4
@@ -50,17 +53,18 @@ jobs:
       - name: Install huggingface_hub
         run: pip install 'huggingface_hub==0.23.4'
 
-      - name: Resolve HF_TOKEN_FILE path
-        id: tok
+      - name: Verify HF_TOKEN_FILE is mounted + mode-compliant
         env:
-          HF_TOKEN_FILE: ${{ secrets.HF_TOKEN_FILE }}
+          HF_TOKEN_FILE: ${{ env.HF_TOKEN_FILE }}
         run: |
+          # The runner pod (idp/platform/agent-foundry/runner/) mounts the HF token
+          # via ESO. If it isn't there, the runner is broken -- fail fast.
           if [ -z "${HF_TOKEN_FILE:-}" ]; then
-            echo "::error::HF_TOKEN_FILE repo secret is not set. Add it under Settings -> Secrets -> Actions before dispatching this workflow (LAW 31, R52)."
+            echo "::error::HF_TOKEN_FILE env is unset on the runner. The runner pod should set it (idp/platform/agent-foundry/runner/runner-deployment.yaml)."
             exit 1
           fi
           if [ ! -f "${HF_TOKEN_FILE}" ]; then
-            echo "::error::HF_TOKEN_FILE=${HF_TOKEN_FILE} is set but the file is not present on the runner."
+            echo "::error::HF_TOKEN_FILE=${HF_TOKEN_FILE} is set but the file is not present on the runner. Check the projected volume in runner-deployment.yaml."
             exit 1
           fi
           mode="$(stat -c '%a' "${HF_TOKEN_FILE}")"
@@ -68,27 +72,28 @@ jobs:
             echo "::error::HF_TOKEN_FILE mode is ${mode}; must be 400 or 600."
             exit 1
           fi
-          echo "token_file=${HF_TOKEN_FILE}" >>"${GITHUB_OUTPUT}"
-          echo "mode=${mode}" >>"${GITHUB_OUTPUT}"
+          echo "HF_TOKEN_FILE_OK mode=${mode}"
 
       - name: Resolve audit sink
         id: audit
         env:
-          AF_DATABASE_URL: ${{ secrets.AF_DATABASE_URL }}
-          AF_DEPLOY_AUDIT_DIR: ${{ vars.AF_DEPLOY_AUDIT_DIR }}
+          AF_DATABASE_URL: ${{ env.AF_DATABASE_URL }}
+          AF_DEPLOY_AUDIT_DIR: ${{ env.AF_DEPLOY_AUDIT_DIR }}
         run: |
           mkdir -p "${RUNNER_TEMP}/af-audit"
           if [ -z "${AF_DATABASE_URL:-}" ] && [ -z "${AF_DEPLOY_AUDIT_DIR:-}" ]; then
-            echo "::error::No audit sink configured. Set one of: secrets.AF_DATABASE_URL (estate DB) or vars.AF_DEPLOY_AUDIT_DIR (JSONL). Refusing to run dark (LAW 50)."
+            echo "::error::No audit sink configured. Set one of: env.AF_DATABASE_URL (estate DB) or env.AF_DEPLOY_AUDIT_DIR (JSONL). Refusing to run dark (LAW 50)."
             exit 1
           fi
           echo "audit_dir=${RUNNER_TEMP}/af-audit" >>"${GITHUB_OUTPUT}"
           echo "dsn_set=$([ -n "${AF_DATABASE_URL:-}" ] && echo true || echo false)" >>"${GITHUB_OUTPUT}"
 
       - name: Run deploy_hf_space.py
+        # HF_TOKEN_FILE + AF_DATABASE_URL + AF_DEPLOY_AUDIT_DIR all inherit from
+        # the runner pod's env (set by the runner deployment + ESO-mounted secrets).
         env:
-          HF_TOKEN_FILE: ${{ secrets.HF_TOKEN_FILE }}
-          AF_DATABASE_URL: ${{ secrets.AF_DATABASE_URL }}
+          HF_TOKEN_FILE: ${{ env.HF_TOKEN_FILE }}
+          AF_DATABASE_URL: ${{ env.AF_DATABASE_URL }}
           AF_DEPLOY_AUDIT_DIR: ${{ steps.audit.outputs.audit_dir }}
         run: |
           set -euo pipefail
