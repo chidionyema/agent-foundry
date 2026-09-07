@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Test / run fixtures written at runtime (metering, scratch)
+meter/
+*.jsonl
+
+# Local only
+.DS_Store

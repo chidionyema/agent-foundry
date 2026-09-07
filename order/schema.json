@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-foundry/order/schema.json",
+  "title": "agent-foundry order",
+  "description": "The validated input gate of the agent-foundry factory. A tenant submits exactly one of these per order. Every downstream step (assembly, provisioning, run, metering) consumes this document and holds the invariants below. Mirrors ORDER.md section 1.",
+  "type": "object",
+  "required": [
+    "order_id",
+    "tenant_id",
+    "goal",
+    "bot_count",
+    "scope",
+    "assembly",
+    "created_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "order_id": {
+      "type": "string",
+      "pattern": "^ord_[A-Za-z0-9_-]+$",
+      "description": "Tenant-assigned order id. Never parsed by the bus; every subject names tenant + bot slug, not an id the bus must chase."
+    },
+    "tenant_id": {
+      "type": "string",
+      "pattern": "^ten_[A-Za-z0-9_-]+$",
+      "description": "Tenant-assigned. Validated against the API key by the gateway (Phase 3). A tenant can only act on its own order."
+    },
+    "goal": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000,
+      "description": "The single objective the army must hit."
+    },
+    "bot_count": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "ANY integer >= 1, unbounded (1, 2, 9000). NOT a one/many enum. bot_count > 1 uses the same assembly as == 1 repeated across bus fan-out. Treating one specific N as a distinct code path is a defect."
+    },
+    "scope": {
+      "type": "object",
+      "description": "Goal-specific parameter block. Free-form today; a specific army's manifest pins its shape.",
+      "minProperties": 1
+    },
+    "assembly": {
+      "type": "object",
+      "required": ["mode", "train_gate"],
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["firstile", "frontier", "train_candidate"],
+          "description": "firstile = filter-first (function or single frontier call). train_candidate on an order is held, gated and NOT run by the factory."
+        },
+        "train_gate": {
+          "type": "string",
+          "enum": ["deferred", "hot", "cold"],
+          "description": "deferred today; makes concrete WHICH LoRA we would distil and its gating metric so the factory never silently trains."
+        }
+      }
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO8601 timestamp when the order was created."
+    },
+    "run_id": {
+      "type": "string",
+      "description": "Optional. Assigned at submit time to correlate one end-to-end run across every node's metering rows."
+    }
+  }
+}

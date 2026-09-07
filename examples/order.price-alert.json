@@ -1,0 +1,14 @@
+{
+  "order_id": "ord_pricealert_demo",
+  "tenant_id": "ten_acme",
+  "goal": "watch competitor pricing for the Acme Widget 3000 and alert when it is more than 10% cheaper than our shelf price",
+  "bot_count": 5,
+  "scope": {
+    "url": "https://competitor.example/acme-widget-3000",
+    "product_name": "Acme Widget 3000",
+    "our_price": 100.0,
+    "threshold_pct": 10.0
+  },
+  "assembly": { "mode": "firstile", "train_gate": "deferred" },
+  "created_at": "2026-09-07T00:00:00Z"
+}
