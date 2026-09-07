@@ -79,14 +79,12 @@ def cmd_run(args: argparse.Namespace) -> int:
     )
 
     seed = {"url": scope.get("url", "https://competitor.example")}
-    # html comes from --seed-html file (offline harness) or scope.html; never from
-    # a hardcoded checkout path.
+    # html comes from --seed-html file (offline harness) or scope.html; when
+    # neither is present the Scout node fetches the url over the network.
     if args.seed_html:
         seed["html"] = _read_text(args.seed_html)
-    elif "html" in scope:
+    elif scope.get("html"):
         seed["html"] = scope["html"]
-    else:
-        seed["html"] = ""
 
     meter: Meter | None = None
     fm: FileMeter | None = None
