@@ -152,12 +152,16 @@ def test_export_metrics_writes_json(tmp_path):
 
 
 def test_train_never_fabricates_on_host_without_hf_libs():
-    """train() MUST fail closed (raise) here; it may never return a 'trained'
-    dict it did not actually fit."""
+    """train() MUST fail closed (RuntimeError) here; it may never return a
+    'trained' dict it did not actually fit, and must name the missing libs so the
+    exec-host (HF Space §6) is the clear, plain next step."""
     rows = _corpus(n_per_class=5)
     train, test = ft.split(rows)
-    with pytest.raises((RuntimeError, NotImplementedError)):
+    with pytest.raises(RuntimeError) as exc:
         ft.train(train, test, out_dir=Path("unused"))
+    msg = str(exc.value)
+    # the failure is honest and actionable: names absent libs + where to run
+    assert "HF free GPU" in msg or "missing" in msg
 
 
 def test_pick_device_returns_expected_values_without_gpu():
