@@ -55,6 +55,71 @@ from af.meter import Execution  # reuse the platform's event shape (no format dr
 _REQUIRED_FILES = ("app.py", "requirements.txt", "README.md")
 
 
+# --- central-collector audit post (LAW 50 / ORDER.md §3 + §6) --------------------
+# When $AF_DATABASE_URL is set the deploy row goes to the estate's
+# task_executions table via af.db.EstateDbMeter (the canonical sink). When
+# --audit-dir / $AF_DEPLOY_AUDIT_DIR is set, the same row also lands in a local
+# JSONL file for ops debugging + headless / test runs without the cluster.
+# Refuses dark if neither is configured.
+def _post_audit(
+    *,
+    audit_dir: Path | None,
+    username: str,
+    space_name: str,
+    visibility: str,
+    repo_id: str,
+) -> None:
+    row = Execution(
+        tenant_id=f"hf:{username}",  # tenancy = the HF owner; not a real tenant
+        order_id=f"deploy-{space_name}",
+        run_id=f"space-create-{int(time.time())}",
+        agent_slug="foundry.hf_space_deploy",
+        status="ran",
+        started_at=time.time(),
+        finished_at=time.time(),
+        detail={
+            "hf_repo_id": repo_id,
+            "visibility": visibility,
+            "space_name": space_name,
+        },
+    ).to_json()
+
+    # 1) Canonical: estate DB row (if DSN is set). Lazy import keeps the script
+    #    runnable on hosts without psycopg2 installed.
+    if os.environ.get("AF_DATABASE_URL"):
+        try:
+            import psycopg2  # type: ignore[import-untyped]
+        except ImportError as e:
+            raise SystemExit(
+                "FAIL: $AF_DATABASE_URL is set but psycopg2 is not installed. "
+                "Install with: pip install 'psycopg2-binary' (or pip install "
+                "agent-foundry[estate] once the extra ships). Refusing to run "
+                "dark: a configured DSN means a configured DB row is expected."
+            ) from e
+
+        # Lazy import of the estate meter so the script's module load stays clean
+        # even when this code path is not taken.
+        from af.db import EstateDbMeter, apply_migrations
+
+        conn = psycopg2.connect(os.environ["AF_DATABASE_URL"])
+        try:
+            apply_migrations(conn)
+            EstateDbMeter().write(conn, Execution(**row))
+            print(
+                f"audit row inserted: estate task_executions (tenant={row['tenant_id']})"
+            )
+        finally:
+            conn.close()
+
+    # 2) Parallel local sink: JSONL under audit_dir (always, when audit_dir set).
+    if audit_dir is not None:
+        audit_dir.mkdir(parents=True, exist_ok=True)
+        out = audit_dir / "deploy_audit.jsonl"
+        with out.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row, sort_keys=True) + "\n")
+        print(f"audit row appended to: {out}")
+
+
 # --- central-collector audit post (LAW 50 / ORDER.md §6) -------------------------
 def _post_audit(
     *,
@@ -166,17 +231,21 @@ def main() -> None:
     if missing:
         raise SystemExit(f"FAIL: {src} missing: {missing}")
 
-    # --- Resolve audit dir (refuse-dark per LAW 50) ---
+    # --- Resolve audit sinks (refuse-dark per LAW 50) ---
+    # At least one of: $AF_DATABASE_URL (canonical estate DB) OR --audit-dir /
+    # $AF_DEPLOY_AUDIT_DIR (parallel local JSONL for ops + tests). With both set
+    # we post to both; with just one, we post to that one. With neither, refuse.
     audit_dir = args.audit_dir or (
         Path(os.environ["AF_DEPLOY_AUDIT_DIR"])
         if os.environ.get("AF_DEPLOY_AUDIT_DIR")
         else None
     )
-    if audit_dir is None:
+    if audit_dir is None and not os.environ.get("AF_DATABASE_URL"):
         raise SystemExit(
-            "FAIL: no audit sink configured. Pass --audit-dir <dir> or set "
-            "$AF_DEPLOY_AUDIT_DIR. A deploy without an audit row is an unobserved "
-            "workload (LAW 50)."
+            "FAIL: no audit sink configured. Set one of: "
+            "--audit-dir <dir>, $AF_DEPLOY_AUDIT_DIR, or $AF_DATABASE_URL "
+            "(estate DB). A deploy without an audit row is an unobserved workload "
+            "(LAW 50)."
         )
 
     # --- Dry-run: print the plan, no HF calls, no audit row ---

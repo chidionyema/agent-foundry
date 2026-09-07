@@ -1,0 +1,117 @@
+# button: Publish trainer Space to HF
+# founder: Creates + pushes an Agent Foundry LoRA-trainer Space on HF Hub.
+# crew#819 / ORDER.md §6: operator's HF token arrives via HF_TOKEN_FILE repo
+# secret (mounted-file policy); the script itself refuses to load it from an
+# env var (kyverno blocks env.valueFrom.secretKeyRef on the Space pod too).
+# This workflow is the user-facing entry point from the idp Backstage template
+# backstage/templates/agent-foundry-space/template.yaml.
+name: agent-foundry-space-deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      space_name:
+        description: "HF Space slug (must be unique on HF Hub)"
+        required: true
+        type: string
+      visibility:
+        description: "public or private"
+        required: false
+        type: choice
+        default: "public"
+        options: ["public", "private"]
+      source_dir:
+        description: "Source directory (empty = repo's default foundry/space)"
+        required: false
+        type: string
+        default: ""
+      dry_run:
+        description: "Dry run only (print plan, do not create)"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy Space
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout agent-foundry
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install huggingface_hub
+        run: pip install 'huggingface_hub==0.23.4'
+
+      - name: Resolve HF_TOKEN_FILE path
+        id: tok
+        env:
+          HF_TOKEN_FILE: ${{ secrets.HF_TOKEN_FILE }}
+        run: |
+          if [ -z "${HF_TOKEN_FILE:-}" ]; then
+            echo "::error::HF_TOKEN_FILE repo secret is not set. Add it under Settings -> Secrets -> Actions before dispatching this workflow (LAW 31, R52)."
+            exit 1
+          fi
+          if [ ! -f "${HF_TOKEN_FILE}" ]; then
+            echo "::error::HF_TOKEN_FILE=${HF_TOKEN_FILE} is set but the file is not present on the runner."
+            exit 1
+          fi
+          mode="$(stat -c '%a' "${HF_TOKEN_FILE}")"
+          if [ "${mode}" != "600" ] && [ "${mode}" != "400" ]; then
+            echo "::error::HF_TOKEN_FILE mode is ${mode}; must be 400 or 600."
+            exit 1
+          fi
+          echo "token_file=${HF_TOKEN_FILE}" >>"${GITHUB_OUTPUT}"
+          echo "mode=${mode}" >>"${GITHUB_OUTPUT}"
+
+      - name: Resolve audit sink
+        id: audit
+        env:
+          AF_DATABASE_URL: ${{ secrets.AF_DATABASE_URL }}
+          AF_DEPLOY_AUDIT_DIR: ${{ vars.AF_DEPLOY_AUDIT_DIR }}
+        run: |
+          mkdir -p "${RUNNER_TEMP}/af-audit"
+          if [ -z "${AF_DATABASE_URL:-}" ] && [ -z "${AF_DEPLOY_AUDIT_DIR:-}" ]; then
+            echo "::error::No audit sink configured. Set one of: secrets.AF_DATABASE_URL (estate DB) or vars.AF_DEPLOY_AUDIT_DIR (JSONL). Refusing to run dark (LAW 50)."
+            exit 1
+          fi
+          echo "audit_dir=${RUNNER_TEMP}/af-audit" >>"${GITHUB_OUTPUT}"
+          echo "dsn_set=$([ -n "${AF_DATABASE_URL:-}" ] && echo true || echo false)" >>"${GITHUB_OUTPUT}"
+
+      - name: Run deploy_hf_space.py
+        env:
+          HF_TOKEN_FILE: ${{ secrets.HF_TOKEN_FILE }}
+          AF_DATABASE_URL: ${{ secrets.AF_DATABASE_URL }}
+          AF_DEPLOY_AUDIT_DIR: ${{ steps.audit.outputs.audit_dir }}
+        run: |
+          set -euo pipefail
+          args=(
+            --space-name "${{ inputs.space_name }}"
+            --token-file "${HF_TOKEN_FILE}"
+            --visibility "${{ inputs.visibility }}"
+            --audit-dir "${{ steps.audit.outputs.audit_dir }}"
+          )
+          if [ -n "${{ inputs.source_dir }}" ]; then
+            args+=(--source "${{ inputs.source_dir }}")
+          fi
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            args+=(--dry-run)
+          fi
+          python3 scripts/deploy_hf_space.py "${args[@]}" | tee "${RUNNER_TEMP}/deploy.log"
+
+      - name: Upload audit row + deploy log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-artifacts
+          path: |
+            ${{ steps.audit.outputs.audit_dir }}/deploy_audit.jsonl
+            ${{ runner.temp }}/deploy.log
+          if-no-files-found: ignore
