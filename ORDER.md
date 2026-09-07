@@ -1,9 +1,16 @@
-# agent-foundry — order & assembly contract (filter-first)
+# agent-foundry — order & assembly contract (dual-mode: make-to-order + make-to-stock)
 
 Status: FIRST IMPLEMENTATION ARTIFACT; supersedes SPEC.md §2 as the build authorisation for the
-order path. The founder approved "swarm runtime first, filter-first" and confirmed the product
-core: **a customer orders 1 or many bots; the factory assembles them into a running coordinated
-army on the estate bus.**
+order path.
+
+**Dual-Mode flip (founder decision 2026-09-07, overrides the earlier filter-first sign-off):** the
+factory serves BOTH flows on one platform — Make-to-Order (a tenant orders 1..N bots assembled
+into a coordinated army on the estate bus) AND Make-to-Stock (the factory invents a reusable agent,
+trains a cheap 1B LoRA once, and lists it on a storefront sellable to many tenants). Products are
+"Swarm Templates": a strong frontier brain for research/reasoning + a distilled cheap LoRA for
+mechanical output, routed over the estate NATS bus. A store-bought template is the same composite as
+an ordered one — the buyer just gets it through the storefront row, not a fresh frontier call (see
+§7 Marketplace).
 
 ## 0. The confirmed product core
 
@@ -84,9 +91,12 @@ The founder approved swarm-runtime-first. So this repo first delivers, in order:
    validation repair loop from the spec's Phase 4 worker.
 4. A `many` example pack = the SPEC §6 price-alert army wired end to end.
 
-Deliberately deferred (NEVER built until traffic gates pass): vLLM multi-LoRA, Unsloth foundry,
-S3 adapter store, the Postgres tenant/billing schema's `agents` training table. One thing rides
-ahead: the `tenants` + `task_executions` metering rows, because metering is platform, and the
+Deliberately deferred UNTIL the HF execution environment is proven (see below): the LIVE push of a
+trained QLoRA to the Hugging Face hub and the storefront commerce rows. The training spine itself
+generator.py + foundry_trainer.py building a small QLoRA on HF free GPU is now IN scope (founder
+Dual-Mode flip 2026-09-07) — no longer "NEVER built". Still deferred: vLLM multi-LoRA serving,
+Unsloth foundry beyond the HF PoC, S3 adapter store, commercial billing. One thing rides ahead
+unchanged: the `tenants` + `task_executions` metering rows, because metering is platform, and the
 estate's DB is the estate's DB (one DB row), not a second store.
 
 ## 4. Guardrails for order fulfilment
@@ -95,10 +105,42 @@ estate's DB is the estate's DB (one DB row), not a second store.
   on transient error, DLQ after 3 — exact mechanic from the spec's Phase 4 worker.
 - Cross-tenant isolation via gateway-validated `tenant_id`; every subject names the tenant:
   `tasks.<tenant_id>.<agent_slug>`.
-- No bot is ever auto-trained; nothing in `order` or `assemble` triggers a GPU.
+- No bot is ever auto-trained withOUT an explicit make-to-stock Publish decision; the headless
+  first milestone and a Make-to-Order run never trigger a GPU. Only the foundry training spine
+  (founder Approved on a Swarm Template) exercises HF free GPU, and only after the §6 seam is set.
 
 ## 5. Definition of done for the first milestone
 
 A `many` order for the price-alert army, submitted over the bus, converges to all five bots
 **running as functions** with a completed end-to-end run (a page fetched, cleaned, price parsed,
 compared, alert emitted) recorded in metering — with NO vLLM and NO Unsloth in the path.
+
+## 6. HF execution environment (policy-clean, estate-secret seam)
+
+Training runs on Hugging Face free GPU, NOT this laptop (no GPU here). The HF credential never
+touches this repo or a shell environment: it is read from a mounted secret file the operator
+declares, refusing to run when absent. Mirrors otto-gateway exactly — Kyverno forbids
+env.valueFrom.secretKeyRef / envFrom.secretRef, so the token arrives as a mounted file and is read
+via a `*_FILE` env, never as a pod env var or console paste (LAW 46/52/54). Rotation via
+`bin/idp-vault-put --merge`, never a chat, manifest or log. agent-foundry holds no HF key.
+
+## 7. Marketplace (make-to-stock) — resolved schema, builds on the train-capability node
+
+A Swarm Template is the sellable composite of a strong-frontier-brain prompt + a distilled cheap
+LoRA for the mechanical output + the NATS routing/swarm wiring. Selling an agent to the Nth
+customer costs ~zero new infra because the LoRA is trained once and hot-loaded; the marginal sale
+is a storefront row, not a new train.
+
+Private vs public rides the ONE `agents` registry (a capability node is real whether it was ordered
+by a tenant, or invented by the factory and listed):
+
+- A **private** agent (Make-to-Order): trained/generated on a tenant's behalf, and only that
+  `tenant_id` may reach its LoRA. `tenant_id` NOT NULL, `is_public` FALSE.
+- A **marketplace** agent (Make-to-Stock): built by the factory on a Publish decision (founder
+  approved), owned by the system not a tenant. `tenant_id` IS NULL (system-owned), `is_public`
+  TRUE, plus `price_tier`.
+- Buying does NOT train. A storefront purchase inserts a row into `tenant_subscriptions`
+  (tenant_id → the pre-trained adapter), which vLLM hot-loads. `tenant_subscriptions` and the sale
+  are real but only reachable after §6's HF environment is live; until then the schema is declared
+  and the spine (generator.py + foundry_trainer.py) is written and unit-verifiable, not yet pushing
+  to a hub.
