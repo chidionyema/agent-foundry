@@ -85,8 +85,10 @@ class Scout:
         if not isinstance(url, str) or not url.startswith(("http://", "https://")):
             raise PermanentlyRejected(f"scout: bad or missing url {url!r}")
         injected = payload.get("html")
-        if injected is not None:
-            html = injected if isinstance(injected, str) else json.dumps(injected)
+        if isinstance(injected, str) and injected.strip():
+            html = injected  # offline / deterministic harness content
+        elif injected is not None and not isinstance(injected, str):
+            html = json.dumps(injected)
         else:
             try:
                 html = await _to_async(self._fetch, url)
