@@ -9,6 +9,10 @@ dependencies = [
     "beautifulsoup4>=4.12",
 ]
 [project.optional-dependencies]
+# The datastore metering backend (af/db.py) rides on the estate Postgres the same
+# way research-engine does (psycopg). Kept optional so the headless jsonl path and
+# its tests never force the driver; the deployed image installs this extra.
+estate = ["psycopg[binary]>=3.1,<4"]
 dev = ["pytest>=8"]
 [project.scripts]
 agent-foundry = "af.cli:main"
