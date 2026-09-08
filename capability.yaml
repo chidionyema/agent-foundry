@@ -1,0 +1,12 @@
+id: auto-agent-foundry
+name: agent-foundry
+repo: agent-foundry
+path: agent-foundry
+state: HAS_CLUSTER_MANIFEST
+git_branch: main
+last_commit: '2026-09-07'
+code_files: 26
+test_files: 9
+indicators:
+- pyproject.toml
+requires_deep_review: true
