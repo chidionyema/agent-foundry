@@ -1,0 +1,18 @@
+name: agents-md-gate
+on:
+  pull_request:
+    paths: ["AGENTS.md"]
+  push:
+    branches: [main]
+    paths: ["AGENTS.md"]
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: AGENTS.md must be ≤300 lines
+        run: |
+          lines=$(wc -l < AGENTS.md)
+          if [ "\$lines" -gt 300 ]; then echo "FAIL: AGENTS.md is \$lines lines (max 300)"; exit 1; fi
+          echo "OK: AGENTS.md is \$lines lines"
