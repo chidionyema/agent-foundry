@@ -1,12 +1,72 @@
-id: auto-agent-foundry
-name: agent-foundry
-repo: agent-foundry
-path: agent-foundry
-state: HAS_CLUSTER_MANIFEST
-git_branch: main
-last_commit: '2026-09-07'
-code_files: 26
-test_files: 9
-indicators:
-- pyproject.toml
-requires_deep_review: true
+terminals:
+  - terminal:
+      id: army
+      name: "Army assembly"
+      input:  { shape: "{order_id: text, goal: text, terminals: json}" }
+      output: { shape: "{run_id: text, metered: json}" }
+      grade:
+        metric: convergence
+        polarity: maximize
+        scale: [0,1]
+        gate: { terminal: delivery_delivered, sandbox: subprocess }
+      state: current
+      since: "2026-09-07"
+      annotations:
+        class: act
+        mode: function
+        scope: { resources: [nats, db], secrets: {}, tenant_isolated: true }
+        role: branch
+
+  - terminal:
+      id: web-scrape
+      name: "Web scrape"
+      input:  { shape: "{goal: text}" }
+      output: { shape: "{html: text, url: text}" }
+      grade:
+        metric: accuracy
+        polarity: maximize
+        scale: [0,1]
+        gate: { terminal: delivery_delivered, sandbox: subprocess }
+      state: current
+      since: "2026-09-07"
+      annotations:
+        class: act
+        mode: function
+        scope: { resources: [web], secrets: {}, tenant_isolated: true }
+        role: branch
+
+  - terminal:
+      id: price-extract
+      name: "Price extract"
+      input:  { shape: "{html: text}" }
+      output: { shape: price.result }
+      grade:
+        metric: accuracy
+        polarity: maximize
+        scale: [0,1]
+        gate: { terminal: delivery_delivered, sandbox: subprocess }
+      state: current
+      since: "2026-09-07"
+      annotations:
+        class: act
+        mode: function
+        scope: { resources: [web], secrets: {}, tenant_isolated: true }
+        role: branch
+
+  - terminal:
+      id: alert-emit
+      name: "Alert emit"
+      input:  { shape: price.result }
+      output: { shape: price.alert }
+      grade:
+        metric: accuracy
+        polarity: maximize
+        scale: [0,1]
+        gate: { terminal: delivery_delivered, sandbox: subprocess }
+      state: current
+      since: "2026-09-07"
+      annotations:
+        class: act
+        mode: function
+        scope: { resources: [db], secrets: {}, tenant_isolated: true }
+        role: branch
